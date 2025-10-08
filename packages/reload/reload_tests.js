@@ -32,3 +32,29 @@ Tinytest.add("reload - migrate", function (test) {
     test.equal(data.reload, true);
   });
 });
+
+Tinytest.add("reload - cross-server DDP migration", function (test) {
+  const originalConfig = global.__meteor_runtime_config__;
+  const originalWindow = global.window;
+  
+  try {
+    global.__meteor_runtime_config__ = {
+      DDP_DEFAULT_CONNECTION_URL: 'http://different-server.com'
+    };
+    global.window = {
+      location: { origin: 'http://localhost:3000' }
+    };
+    
+    Reload._withFreshProvidersForTest(function () {
+      Reload._onMigrate("test migration", function (tryReload, options) {
+        return [true, { test: "data" }];
+      });
+      
+      test.isFalse(Reload._migrate(function () {}));
+      test.isFalse(Reload._getData());
+    });
+  } finally {
+    global.__meteor_runtime_config__ = originalConfig;
+    global.window = originalWindow;
+  }
+});
