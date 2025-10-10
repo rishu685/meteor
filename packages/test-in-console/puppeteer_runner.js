@@ -20,14 +20,24 @@ async function runNextUrl(browser) {
     else {
       testNumber++;
       const currentClientTest =
-       await page.evaluate(() =>  __Tinytest._getCurrentRunningTestOnClient());
+       await page.evaluate(() => {
+         if (typeof __Tinytest !== 'undefined' && __Tinytest._getCurrentRunningTestOnClient) {
+           return __Tinytest._getCurrentRunningTestOnClient();
+         }
+         return '';
+       });
       if (currentClientTest !== '') {
         console.log(`Currently running on the client test: ${ currentClientTest }`)
         return;
       }
       // If we get here is because we have not yet started the test on the client
       const currentServerTest =
-       await page.evaluate(async () => await __Tinytest._getCurrentRunningTestOnServer());
+       await page.evaluate(async () => {
+         if (typeof __Tinytest !== 'undefined' && __Tinytest._getCurrentRunningTestOnServer) {
+           return await __Tinytest._getCurrentRunningTestOnServer();
+         }
+         return '';
+       });
 
       if (currentServerTest !== '') {
         console.log(`Currently running on the server test: ${ currentServerTest }`);
@@ -39,30 +49,119 @@ async function runNextUrl(browser) {
   });
 
   if (!process.env.URL) {
+    console.log('ERROR: URL environment variable not set');
     process.exit(1);
     return;
   }
 
-  await page.goto(process.env.URL);
+  console.log('Loading test page at:', process.env.URL);
+  
+  try {
+    await page.goto(process.env.URL, { 
+      waitUntil: 'networkidle2',
+      timeout: 30000 
+    });
+    console.log('Test page loaded successfully');
+  } catch (error) {
+    console.log('Error loading test page:', error.message);
+    await page.close();
+    await browser.close();
+    process.exit(1);
+  }
+
+  let timedOut = false;
+  // Increase timeout for CI environments, especially Travis CI
+  let timeout = 60000; // Default 1 minute for local
+  
+  if (process.env.CI_TIMEOUT) {
+    const parsedTimeout = parseInt(process.env.CI_TIMEOUT);
+    if (!isNaN(parsedTimeout) && parsedTimeout > 0) {
+      timeout = parsedTimeout;
+      console.log('Using custom CI_TIMEOUT:', timeout / 1000, 'seconds');
+    }
+  } else if (process.env.CI || process.env.TRAVIS || process.env.GITHUB_ACTIONS || process.env.CIRCLECI) {
+    timeout = 300000; // Default 5 minutes for CI
+    console.log('Using default CI timeout:', timeout / 1000, 'seconds');
+  }
+  
+  console.log('Test timeout set to:', timeout / 1000, 'seconds');
+  
+  let timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    console.log('Tests timed out after', timeout / 1000, 'seconds');
+  }, timeout);
 
   async function poll() {
-    if (await isDone(page)) {
-      let failCount = await getFailCount(page);
-      console.log(`Tests complete with ${ failCount } failures`);
-      console.log(`Tests complete with ${ await getPassCount(page) } passes`);
-      if (failCount > 0) {
-        const failed = await getFailed(page);
-        failed.map((f) => console.log(`${ f.name } failed: ${ f.info }`));
-        await page.close();
+    if (timedOut) {
+      console.log('Timeout reached, checking test status one final time...');
+      try {
+        let failCount = await getFailCount(page);
+        console.log(`Tests timed out with ${ failCount } failures so far`);
+      } catch (e) {
+        console.log('Could not get final test status due to timeout');
+      }
+      try {
+        if (!page.isClosed()) {
+          await page.close();
+        }
+      } catch (e) {
+        // Ignore page close errors after timeout
+      }
+      try {
+        await browser.close();
+      } catch (e) {
+        // Ignore browser close errors after timeout
+      }
+      process.exit(1);
+    }
+
+    try {
+      // Check if page is still connected before polling
+      if (page.isClosed()) {
+        console.log('Page was closed unexpectedly');
         await browser.close();
         process.exit(1);
-      } else {
-        await page.close();
-        await browser.close();
-        process.exit(0);
       }
-    } else {
-      setTimeout(poll, 1000);
+
+      if (await isDone(page)) {
+        clearTimeout(timeoutHandle);
+        let failCount = await getFailCount(page);
+        console.log(`Tests complete with ${ failCount } failures`);
+        console.log(`Tests complete with ${ await getPassCount(page) } passes`);
+        if (failCount > 0) {
+          const failed = await getFailed(page);
+          failed.map((f) => console.log(`${ f.name } failed: ${ f.info }`));
+          await page.close();
+          await browser.close();
+          process.exit(1);
+        } else {
+          await page.close();
+          await browser.close();
+          process.exit(0);
+        }
+      } else {
+        setTimeout(poll, 1000);
+      }
+    } catch (error) {
+      // Handle frame detachment and other navigation errors
+      if (error.message.includes('detached Frame') || 
+          error.message.includes('Session closed') ||
+          error.message.includes('Target closed')) {
+        console.log('Page navigation detected, attempting to continue...');
+        // Try to wait for page to stabilize
+        try {
+          await page.waitForSelector('body', { timeout: 5000 });
+        } catch (e) {
+          // If we can't stabilize, exit
+          console.log('Could not stabilize page after navigation');
+          await browser.close();
+          process.exit(1);
+        }
+      } else {
+        console.log('Error during test polling:', error.message);
+      }
+      // Continue polling with longer delay
+      setTimeout(poll, 2000);
     }
   }
 
@@ -75,13 +174,29 @@ async function runNextUrl(browser) {
  * @return {Promise<boolean>}
  */
 async function isDone(page) {
-  return await page.evaluate(function () {
-    if (typeof TEST_STATUS !== 'undefined') {
-      return TEST_STATUS.DONE;
+  try {
+    // Check if page is closed before attempting evaluation
+    if (page.isClosed()) {
+      return false;
     }
-
-    return typeof DONE !== 'undefined' && DONE;
-  });
+    
+    return await page.evaluate(function () {
+      if (typeof TEST_STATUS !== 'undefined') {
+        return TEST_STATUS.DONE;
+      }
+      return typeof DONE !== 'undefined' && DONE;
+    });
+  } catch (error) {
+    // Handle frame detachment gracefully
+    if (error.message.includes('detached Frame') || 
+        error.message.includes('Session closed') ||
+        error.message.includes('Target closed')) {
+      console.log('Frame detached while checking test completion status');
+      return false; // Assume not done if we can't check
+    }
+    console.log('Error checking if tests are done:', error.message);
+    return false;
+  }
 }
 
 /**
@@ -90,13 +205,29 @@ async function isDone(page) {
  * @return {Promise<number>}
  */
 async function getPassCount(page) {
-  return await page.evaluate(function () {
-    if (typeof TEST_STATUS !== 'undefined') {
-      return TEST_STATUS.PASSED;
+  try {
+    // Check if page is closed before attempting evaluation
+    if (page.isClosed()) {
+      return 0;
     }
-
-    return typeof PASSED !== 'undefined' && PASSED;
-  });
+    
+    return await page.evaluate(function () {
+      if (typeof TEST_STATUS !== 'undefined') {
+        return TEST_STATUS.PASSED;
+      }
+      return typeof PASSED !== 'undefined' && PASSED;
+    });
+  } catch (error) {
+    // Handle frame detachment gracefully
+    if (error.message.includes('detached Frame') || 
+        error.message.includes('Session closed') ||
+        error.message.includes('Target closed')) {
+      console.log('Frame detached while getting pass count');
+      return 0;
+    }
+    console.log('Error getting pass count:', error.message);
+    return 0;
+  }
 }
 
 /**
@@ -105,13 +236,29 @@ async function getPassCount(page) {
  * @return {Promise<number>}
  */
 async function getFailCount(page) {
-  return await page.evaluate(function () {
-    if (typeof TEST_STATUS !== 'undefined') {
-      return TEST_STATUS.FAILURES;
+  try {
+    // Check if page is closed before attempting evaluation
+    if (page.isClosed()) {
+      return -1;
     }
-
-    return typeof FAILURES !== 'undefined' && FAILURES;
-  });
+    
+    return await page.evaluate(function () {
+      if (typeof TEST_STATUS !== 'undefined') {
+        return TEST_STATUS.FAILURES;
+      }
+      return typeof FAILURES !== 'undefined' && FAILURES;
+    });
+  } catch (error) {
+    // Handle frame detachment gracefully
+    if (error.message.includes('detached Frame') || 
+        error.message.includes('Session closed') ||
+        error.message.includes('Target closed')) {
+      console.log('Frame detached while getting fail count');
+      return -1;
+    }
+    console.log('Error getting fail count:', error.message);
+    return -1; // Return -1 to indicate error
+  }
 }
 
 /**
@@ -120,28 +267,67 @@ async function getFailCount(page) {
  * @return {Promise<[{name: string, info: string}]>}
  */
 async function getFailed(page) {
-  return await page.evaluate(function () {
-    if (typeof TEST_STATUS !== 'undefined') {
-      return TEST_STATUS.WHERE_FAILED;
+  try {
+    // Check if page is closed before attempting evaluation
+    if (page.isClosed()) {
+      return [];
     }
-    return typeof WHERE_FAILED !== 'undefined' && WHERE_FAILED;
-  });
+    
+    return await page.evaluate(function () {
+      if (typeof TEST_STATUS !== 'undefined') {
+        return TEST_STATUS.WHERE_FAILED;
+      }
+      return typeof WHERE_FAILED !== 'undefined' && WHERE_FAILED;
+    });
+  } catch (error) {
+    // Handle frame detachment gracefully
+    if (error.message.includes('detached Frame') || 
+        error.message.includes('Session closed') ||
+        error.message.includes('Target closed')) {
+      console.log('Frame detached while getting failed tests');
+      return [];
+    }
+    console.log('Error getting failed tests:', error.message);
+    return [];
+  }
 }
 
 async function runTests() {
   console.log(`Running test with Puppeteer at ${process.env.URL}`);
 
+  // Enhanced arguments for better CI compatibility, especially Travis CI
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-web-security',
+    '--disable-dev-shm-usage', // Overcome limited resource problems in CI
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-extensions',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--memory-pressure-off'  // Disable memory pressure warnings in CI
+  ];
+
   // --no-sandbox and --disable-setuid-sandbox must be disabled for CI compatibility
   const browser = await puppeteer.launch({
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-web-security',
-    ],
+    args: launchArgs,
     headless: "new",
+    timeout: 30000,
   });
-  console.log(`Using version: ${await browser.version()}`);
-  await runNextUrl(browser)
+  
+  console.log(`Using Puppeteer version: ${await browser.version()}`);
+  console.log('Browser launch arguments:', launchArgs.join(' '));
+  
+  try {
+    await runNextUrl(browser);
+  } catch (error) {
+    console.log('Error during test execution:', error.message);
+    await browser.close();
+    process.exit(1);
+  }
 }
 
 runTests().catch((e) =>

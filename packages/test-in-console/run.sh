@@ -8,6 +8,16 @@
 cd $(dirname $0)/../..
 export METEOR_HOME=`pwd`
 
+# Set CI-specific environment variables
+if [ "$CI" = "true" ] || [ -n "$TRAVIS" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CIRCLECI" ]; then
+  # Only set CI_TIMEOUT if not already provided
+  if [ -z "$CI_TIMEOUT" ]; then
+    export CI_TIMEOUT=300000  # 5 minutes for CI environments
+  fi
+  export METEOR_NO_DEPRECATION=1  # Suppress deprecation warnings in CI
+  echo "CI environment detected - setting enhanced timeouts and suppressing deprecations"
+fi
+
 # Installs into dev_bundle/lib/node_modules/puppeteer.
 ./meteor npm install -g puppeteer@23.6.0
 
