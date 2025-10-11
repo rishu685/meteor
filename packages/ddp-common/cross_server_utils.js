@@ -1,5 +1,6 @@
 // Shared utility functions for cross-server detection
 // Used by autoupdate, ddp-client packages and tests
+// Updated for PR #13977 fix
 
 // Ensure DDPCommon namespace exists
 if (typeof DDPCommon === 'undefined') {
