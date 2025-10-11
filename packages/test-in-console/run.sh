@@ -22,8 +22,9 @@ if [ "$CI" = "true" ] || [ -n "$TRAVIS" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$
   
   # Travis CI specific optimizations
   if [ -n "$TRAVIS" ]; then
-    export NODE_OPTIONS="--max-old-space-size=4096"  # Increase memory for Travis
+    export NODE_OPTIONS="--max-old-space-size=6144"  # Increase memory for Travis (6GB)
     export METEOR_TEST_TMP="/tmp"  # Use faster temp directory
+    export UV_THREADPOOL_SIZE=4  # Limit thread pool for stability
   fi
   
   echo "CI environment detected - setting enhanced timeouts and suppressing deprecations"
