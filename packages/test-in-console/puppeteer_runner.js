@@ -311,6 +311,19 @@ async function runTests() {
     '--memory-pressure-off'  // Disable memory pressure warnings in CI
   ];
 
+  // Additional Travis CI specific arguments
+  if (process.env.TRAVIS) {
+    launchArgs.push(
+      '--disable-features=TranslateUI',
+      '--disable-ipc-flooding-protection',
+      '--disable-web-resources',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--no-report-upload'
+    );
+  }
+
   // --no-sandbox and --disable-setuid-sandbox must be disabled for CI compatibility
   const browser = await puppeteer.launch({
     args: launchArgs,

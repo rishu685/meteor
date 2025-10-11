@@ -12,9 +12,20 @@ export METEOR_HOME=`pwd`
 if [ "$CI" = "true" ] || [ -n "$TRAVIS" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CIRCLECI" ]; then
   # Only set CI_TIMEOUT if not already provided
   if [ -z "$CI_TIMEOUT" ]; then
-    export CI_TIMEOUT=300000  # 5 minutes for CI environments
+    if [ -n "$TRAVIS" ]; then
+      export CI_TIMEOUT=600000  # 10 minutes for Travis CI (longer timeout)
+    else
+      export CI_TIMEOUT=300000  # 5 minutes for other CI environments
+    fi
   fi
   export METEOR_NO_DEPRECATION=1  # Suppress deprecation warnings in CI
+  
+  # Travis CI specific optimizations
+  if [ -n "$TRAVIS" ]; then
+    export NODE_OPTIONS="--max-old-space-size=4096"  # Increase memory for Travis
+    export METEOR_TEST_TMP="/tmp"  # Use faster temp directory
+  fi
+  
   echo "CI environment detected - setting enhanced timeouts and suppressing deprecations"
 fi
 
