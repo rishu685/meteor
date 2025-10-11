@@ -70,7 +70,7 @@ async function runNextUrl(browser) {
   }
 
   let timedOut = false;
-  // Increase timeout for CI environments, especially Travis CI
+  // Enhanced timeout handling for CI environments
   let timeout = 60000; // Default 1 minute for local
   
   if (process.env.CI_TIMEOUT) {
@@ -79,8 +79,14 @@ async function runNextUrl(browser) {
       timeout = parsedTimeout;
       console.log('Using custom CI_TIMEOUT:', timeout / 1000, 'seconds');
     }
-  } else if (process.env.CI || process.env.TRAVIS || process.env.GITHUB_ACTIONS || process.env.CIRCLECI) {
-    timeout = 300000; // Default 5 minutes for CI
+  } else if (process.env.TRAVIS) {
+    timeout = 900000; // 15 minutes for Travis CI (extended)
+    console.log('Using extended Travis CI timeout:', timeout / 1000, 'seconds');
+  } else if (process.env.CIRCLECI) {
+    timeout = 600000; // 10 minutes for CircleCI
+    console.log('Using CircleCI timeout:', timeout / 1000, 'seconds');
+  } else if (process.env.CI || process.env.GITHUB_ACTIONS) {
+    timeout = 480000; // 8 minutes for other CI
     console.log('Using default CI timeout:', timeout / 1000, 'seconds');
   }
   
