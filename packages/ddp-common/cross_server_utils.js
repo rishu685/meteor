@@ -1,6 +1,22 @@
 // Shared utility functions for cross-server detection
 // Used by autoupdate, ddp-client packages and tests
 
+// Ensure DDPCommon namespace exists
+if (typeof DDPCommon === 'undefined') {
+  if (typeof Package !== 'undefined' && Package['ddp-common']) {
+    DDPCommon = Package['ddp-common'].DDPCommon;
+  } else if (typeof global !== 'undefined') {
+    global.DDPCommon = global.DDPCommon || {};
+    DDPCommon = global.DDPCommon;
+  } else if (typeof window !== 'undefined') {
+    window.DDPCommon = window.DDPCommon || {};
+    DDPCommon = window.DDPCommon;
+  } else {
+    // Fallback for testing environments
+    DDPCommon = {};
+  }
+}
+
 // Get the DDP connection URL from runtime config
 DDPCommon.getDDPUrl = function() {
   if (typeof __meteor_runtime_config__ !== 'undefined' &&
