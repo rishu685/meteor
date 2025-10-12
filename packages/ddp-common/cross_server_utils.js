@@ -33,28 +33,6 @@ DDPCommon.isDDPServerDifferent = function() {
     return false;
   }
   
-  // Don't interfere with test environments
-  if (typeof Meteor !== 'undefined' && Meteor.isTest) {
-    return false;
-  }
-  
-  // Don't interfere if we're in a test runner environment
-  if (typeof process !== 'undefined' && 
-      (process.env.NODE_ENV === 'test' || 
-       process.env.TEST_METADATA || 
-       process.env.IS_MIRROR ||
-       process.env.TRAVIS ||
-       process.env.CI)) {
-    return false;
-  }
-  
-  // Additional safety check for CI environments
-  if (typeof window !== 'undefined' && 
-      (window.location.hostname === 'localhost' || 
-       window.location.hostname === '127.0.0.1')) {
-    return false;
-  }
-  
   const ddpUrl = DDPCommon.getDDPUrl();
   if (!ddpUrl || ddpUrl === '/') {
     return false;
