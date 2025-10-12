@@ -4,19 +4,19 @@ import { DDP } from '../common/namespace.js';
 import { FlickerCollection, FlickerCollectionName } from './allow_deny_setup.js';
 
 const callWhenSubReady = async (subName, handle, cb = () => {}) => {
-  let control = 0;
-
-  while (!handle.ready()) {
-    if (!handle.ready()) {
-      // Just in case something happens with the subscription, we have this control
-      if (control++ === 1000) {
-        throw new Error(`Subscribe to ${subName} is taking too long!`);
-      }
-      await Meteor._sleepForMs(0);
-      return;
-    }
-    await cb();
+  let attempts = 0;
+  const maxAttempts = 1000; // 10 seconds at 10ms intervals
+  
+  while (!handle.ready() && attempts < maxAttempts) {
+    await Meteor._sleepForMs(10);
+    attempts++;
   }
+  
+  if (!handle.ready()) {
+    throw new Error(`Subscribe to ${subName} is taking too long!`);
+  }
+  
+  await cb();
 };
 
 // XXX should check error codes
@@ -1164,13 +1164,20 @@ testAsyncMulti('livedata - methods with nested stubs', [
   function(test, expected) {
     if (Meteor.isClient) {
       const subs = Meteor.subscribe('c' + this.collectionName, () => {});
-      let resolver;
-      const promise = new Promise(r => (resolver = r));
+      let resolver, rejecter;
+      const promise = new Promise((resolve, reject) => {
+        resolver = resolve;
+        rejecter = reject;
+      });
 
+      let attempts = 0;
       const id = setInterval(() => {
         if (subs.ready()) {
           clearInterval(id);
           resolver();
+        } else if (++attempts > 1000) { // 10 second timeout
+          clearInterval(id);
+          rejecter(new Error(`Subscription to c${this.collectionName} never became ready`));
         }
       }, 10);
 
@@ -1226,11 +1233,15 @@ if (Meteor.isClient) {
 
     const sub = Meteor.subscribe(`pub-${collName}`);
 
-    await new Promise(resolve => {
+    await new Promise((resolve, reject) => {
+      let attempts = 0;
       const id = setInterval(() => {
         if (sub.ready()) {
           clearInterval(id);
           resolve();
+        } else if (++attempts > 1000) { // 10 second timeout
+          clearInterval(id);
+          reject(new Error(`Subscription to pub-${collName} never became ready`));
         }
       }, 10);
     });
@@ -1327,7 +1338,7 @@ if (Meteor.isClient) {
 
       const sub = Meteor.subscribe(`pub-${FlickerCollectionName}`);
       
-      await new Promise(resolve => {
+      await new Promise((resolve, reject) => {
         const checkReady = setInterval(() => {
           console.log('sub.ready()', sub.ready());
           if (sub.ready()) {
@@ -1335,6 +1346,12 @@ if (Meteor.isClient) {
             resolve();
           }
         }, 10);
+        
+        // Add timeout protection
+        setTimeout(() => {
+          clearInterval(checkReady);
+          reject(new Error('Subscription timeout - never became ready'));
+        }, 10000); // 10 second timeout
       });
 
       await FlickerCollection.updateAsync(docId, {

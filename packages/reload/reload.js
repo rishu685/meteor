@@ -26,6 +26,29 @@
  * the client's session to render properly.
  */
 
+function isDDPServerDifferent() {
+  if (typeof __meteor_runtime_config__ === 'undefined') {
+    return false;
+  }
+  
+  const ddpUrl = __meteor_runtime_config__.DDP_DEFAULT_CONNECTION_URL;
+  if (!ddpUrl || ddpUrl === '/') {
+    return false;
+  }
+  
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  
+  const currentOrigin = window.location.origin;
+  try {
+    const ddpOrigin = new URL(ddpUrl, currentOrigin).origin;
+    return ddpOrigin !== currentOrigin;
+  } catch (e) {
+    return false;
+  }
+}
+
 // XXX when making this API public, also expose a flag for the app
 // developer to know whether a hot code push is happening. This is
 // useful for apps using `window.onbeforeunload`. See
@@ -204,6 +227,12 @@ const pollProviders = function (tryReload, options) {
 //    regardless of whether packages report that they are ready or not.
 Reload._migrate = function (tryReload, options) {
   debug('_migrate', {options});
+  
+  if (isDDPServerDifferent()) {
+    Meteor._debug("Migration skipped: DDP_DEFAULT_CONNECTION_URL points to different server");
+    return false;
+  }
+  
   // Make sure each package is ready to go, and collect their
   // migration data
   const migrationData = pollProviders(tryReload, options);
