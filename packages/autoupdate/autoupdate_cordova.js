@@ -1,5 +1,28 @@
 import { ClientVersions } from "./client_versions.js";
 
+function isDDPServerDifferent() {
+  if (typeof __meteor_runtime_config__ === 'undefined') {
+    return false;
+  }
+  
+  const ddpUrl = __meteor_runtime_config__.DDP_DEFAULT_CONNECTION_URL;
+  if (!ddpUrl || ddpUrl === '/') {
+    return false;
+  }
+  
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  
+  const currentOrigin = window.location.origin;
+  try {
+    const ddpOrigin = new URL(ddpUrl, currentOrigin).origin;
+    return ddpOrigin !== currentOrigin;
+  } catch (e) {
+    return false;
+  }
+}
+
 var autoupdateVersionsCordova =
   __meteor_runtime_config__.autoupdate.versions["web.cordova"] || {
     version: "unknown"
@@ -85,7 +108,11 @@ Meteor.startup(() => {
     }
   });
 
-  Autoupdate._retrySubscription();
+  if (isDDPServerDifferent()) {
+    console.log("Autoupdate disabled: DDP_DEFAULT_CONNECTION_URL points to different server");
+  } else {
+    Autoupdate._retrySubscription();
+  }
 });
 
 function newVersionAvailable() {

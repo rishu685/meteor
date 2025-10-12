@@ -18,6 +18,29 @@ import { MongoIDMap } from './mongo_id_map';
 import { MessageProcessors } from './message_processors';
 import { DocumentProcessors } from './document_processors';
 
+function isDDPServerDifferent() {
+  if (typeof __meteor_runtime_config__ === 'undefined') {
+    return false;
+  }
+  
+  const ddpUrl = __meteor_runtime_config__.DDP_DEFAULT_CONNECTION_URL;
+  if (!ddpUrl || ddpUrl === '/') {
+    return false;
+  }
+  
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  
+  const currentOrigin = window.location.origin;
+  try {
+    const ddpOrigin = new URL(ddpUrl, currentOrigin).origin;
+    return ddpOrigin !== currentOrigin;
+  } catch (e) {
+    return false;
+  }
+}
+
 // @param url {String|Object} URL to Meteor app,
 //   or an object as a test hook (see code)
 // Options:
@@ -232,6 +255,9 @@ export class Connection {
       Package.reload &&
       ! options.reloadWithOutstanding) {
       Package.reload.Reload._onMigrate(retry => {
+        if (isDDPServerDifferent()) {
+          return [true];
+        }
         if (! self._readyToMigrate()) {
           self._retryMigrate = retry;
           return [false];
